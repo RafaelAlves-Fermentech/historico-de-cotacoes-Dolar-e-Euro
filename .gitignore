@@ -28,3 +28,6 @@ dist/
 # Cache
 .cache/
 .vite/
+
+# Configurações locais do Claude
+.claude/
