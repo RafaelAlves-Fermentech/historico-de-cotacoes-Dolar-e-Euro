@@ -1,0 +1,30 @@
+# Arquivos de ambiente e credenciais
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Arquivos temporários
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Sistema operacional
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Pastas de dependências
+node_modules/
+
+# Arquivos de build e saída gerada
+dist/
+
+# Cache
+.cache/
+.vite/

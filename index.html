@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Histórico de Cotações — Dólar e Euro</title>
+<meta name="description" content="Painel de acompanhamento histórico das cotações de venda do Dólar e do Euro, com dados oficiais do Banco Central do Brasil.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+<a class="skip-link" href="#conteudo">Ir para o conteúdo</a>
+
+<!-- ============================ CABEÇALHO ============================ -->
+<header class="masthead">
+  <div class="wrap masthead-inner">
+    <div class="masthead-id">
+      <span class="masthead-rule" aria-hidden="true"></span>
+      <div>
+        <h1>Histórico de Cotações</h1>
+        <p class="masthead-sub">Dólar e Euro &mdash; cotação de venda</p>
+      </div>
+    </div>
+    <div class="masthead-actions">
+      <span class="source-chip">
+        <span class="source-chip-label">Fonte</span>
+        <span class="source-chip-value">Banco Central do Brasil</span>
+      </span>
+      <button type="button" id="refreshBtn" class="btn-refresh">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M14 8a6 6 0 1 1-1.76-4.24" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M14 1.5V5h-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span id="refreshLabel">Atualizar dados</span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="conteudo" class="wrap">
+
+  <!-- ============================ FILTROS ============================ -->
+  <section class="filters" aria-label="Filtros do período">
+    <div class="filters-row">
+
+      <div class="field-group">
+        <div class="field">
+          <label for="dateStart">Data inicial</label>
+          <input type="date" id="dateStart" name="dateStart">
+        </div>
+        <span class="field-sep" aria-hidden="true">&ndash;</span>
+        <div class="field">
+          <label for="dateEnd">Data final</label>
+          <input type="date" id="dateEnd" name="dateEnd">
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="field-label" id="currencyLabel">Moeda</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="currencyLabel" id="currencySeg">
+          <button type="button" role="radio" data-sel="BOTH" aria-checked="true">Dólar + Euro</button>
+          <button type="button" role="radio" data-sel="USD" aria-checked="false">Dólar</button>
+          <button type="button" role="radio" data-sel="EUR" aria-checked="false">Euro</button>
+        </div>
+      </div>
+
+      <div class="field field-periods">
+        <span class="field-label" id="periodLabel">Período</span>
+        <div class="pills" role="radiogroup" aria-labelledby="periodLabel" id="periodPills">
+          <button type="button" role="radio" data-period="7d"   aria-checked="false">7 dias</button>
+          <button type="button" role="radio" data-period="30d"  aria-checked="true">30 dias</button>
+          <button type="button" role="radio" data-period="90d"  aria-checked="false">90 dias</button>
+          <button type="button" role="radio" data-period="6m"   aria-checked="false">6 meses</button>
+          <button type="button" role="radio" data-period="12m"  aria-checked="false">12 meses</button>
+          <button type="button" role="radio" data-period="ytd"  aria-checked="false">Ano atual</button>
+          <button type="button" role="radio" data-period="custom" aria-checked="false">Personalizado</button>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Avisos: carregando, erro, dados de cache, período fora da série -->
+  <div id="banner" class="banner" role="status" aria-live="polite" hidden></div>
+
+  <!-- ============================ CARDS ============================ -->
+  <section class="cards" id="cards" aria-label="Resumo do período"></section>
+
+  <!-- ============================ GRÁFICO ============================ -->
+  <section class="panel" aria-labelledby="chartTitle">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">PTAX &middot; boletim de fechamento</p>
+        <h2 id="chartTitle">Evolução das cotações</h2>
+      </div>
+      <div class="panel-head-tools">
+        <div class="legend" id="legend"></div>
+        <div class="segmented segmented-sm" role="radiogroup" aria-label="Escala do gráfico" id="scaleSeg">
+          <button type="button" role="radio" data-mode="brl" aria-checked="true">R$</button>
+          <button type="button" role="radio" data-mode="index" aria-checked="false">Base 100</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-wrap">
+      <div id="chart" class="chart" tabindex="0" role="application"
+           aria-describedby="chartHelp"></div>
+      <div id="tooltip" class="tooltip" hidden></div>
+      <div id="chartEmpty" class="empty" hidden></div>
+    </div>
+    <p id="chartHelp" class="panel-note">
+      <span id="scaleNote">Ambas as moedas no mesmo eixo, em reais.</span>
+      O eixo horizontal avança por dia de boletim: sábados, domingos e feriados
+      não aparecem porque não têm cotação. Use as setas do teclado para percorrer as datas.
+    </p>
+  </section>
+
+  <!-- ============================ MÁXIMA / MÍNIMA ============================ -->
+  <section class="extremes" id="extremes" aria-label="Máxima e mínima do período"></section>
+
+  <!-- ============================ TABELA ============================ -->
+  <section class="panel" aria-labelledby="tableTitle">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Cotação de venda</p>
+        <h2 id="tableTitle">Boletins do período</h2>
+      </div>
+      <div class="panel-head-tools">
+        <span class="table-count" id="tableCount"></span>
+        <div class="field field-inline">
+          <label for="pageSize" class="field-label">Linhas</label>
+          <select id="pageSize">
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="table-scroll">
+      <table class="rates" id="ratesTable">
+        <caption class="sr-only">Cotações de venda por data, em reais, conforme o boletim de fechamento do Banco Central do Brasil.</caption>
+        <thead id="ratesHead"></thead>
+        <tbody id="ratesBody"></tbody>
+      </table>
+    </div>
+    <div id="tableEmpty" class="empty" hidden></div>
+
+    <div class="pager" id="pager" hidden>
+      <button type="button" id="prevPage" class="btn-ghost">Anterior</button>
+      <span id="pageInfo" class="pager-info"></span>
+      <button type="button" id="nextPage" class="btn-ghost">Próxima</button>
+    </div>
+  </section>
+
+</main>
+
+<!-- ============================ RODAPÉ ============================ -->
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <div class="footer-item">
+      <span class="footer-label">Fonte dos dados</span>
+      <a class="footer-value" href="https://www.bcb.gov.br/estabilidadefinanceira/historicocotacoes" target="_blank" rel="noopener">Banco Central do Brasil</a>
+    </div>
+    <div class="footer-item">
+      <span class="footer-label">Cotação utilizada</span>
+      <span class="footer-value">Venda &middot; boletim de fechamento (PTAX)</span>
+    </div>
+    <div class="footer-item">
+      <span class="footer-label">Última atualização</span>
+      <span class="footer-value" id="lastUpdate">&mdash;</span>
+    </div>
+  </div>
+</footer>
+
+<script src="src/config.js"></script>
+<script src="src/dates.js"></script>
+<script src="src/format.js"></script>
+<script src="src/cache.js"></script>
+<script src="src/bcb-service.js"></script>
+<script src="src/analytics.js"></script>
+<script src="src/chart.js"></script>
+<script src="src/app.js"></script>
+</body>
+</html>
