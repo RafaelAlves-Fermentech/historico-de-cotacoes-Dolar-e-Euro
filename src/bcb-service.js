@@ -10,26 +10,51 @@
      @dataInicial      MM-DD-YYYY
      @dataFinalCotacao MM-DD-YYYY
      $filter           tipoBoletim eq 'Fechamento'   -> PTAX oficial do dia
-     $select           cotacaoVenda,dataHoraCotacao  -> só o que o painel usa
      $format           json
 
+   ESTRATÉGIA DE RESILIÊNCIA
+   Em 09/10/2026 o serviço do BCB passou a responder 403 a QUALQUER consulta
+   que usasse `$select`, parâmetro que o painel empregava para trazer só dois
+   campos. O recurso continuava íntegro: apenas aquele parâmetro passou a ser
+   recusado. Por isso o `$select` foi removido e a consulta passou a ser
+   montada em camadas, da mais enxuta para a mais crua:
+
+     Tentativa 1 — com $filter   (payload menor, filtragem no servidor)
+     Tentativa 2 — só $format    (traz todos os boletins, filtra aqui)
+
+   Se o BCB recusar um parâmetro opcional no futuro, o painel cai para a
+   tentativa seguinte em vez de ficar sem dados. Só o caminho mínimo
+   — parâmetros de rota + $format — é tratado como obrigatório.
+
    COTAÇÃO DE VENDA: o campo lido é exclusivamente `cotacaoVenda`.
-   `cotacaoCompra` não é sequer solicitado ao servidor ($select), portanto
-   não há caminho possível para um valor de compra entrar no painel.
+   A resposta agora traz também `cotacaoCompra` e as paridades, mas a
+   normalização descarta tudo e constrói o modelo apenas com `cotacaoVenda`.
+   Nenhum outro campo numérico atravessa esta camada.
+
+   BOLETIM DE FECHAMENTO: `normalize` exige `tipoBoletim === 'Fechamento'`
+   sempre que o campo existir no registro, independentemente de o filtro ter
+   sido aplicado pelo servidor. A regra vale mesmo se o $filter for recusado.
    ============================================================= */
 (function (global) {
   'use strict';
 
   var CFG = global.APP_CONFIG;
 
-  function buildUrl(currency, from, to) {
-    return CFG.PTAX_BASE +
+  /**
+   * Monta a URL do recurso.
+   * @param {boolean} [serverFilter=true] aplica $filter no servidor.
+   *        Quando false, devolve todos os boletins do dia — a filtragem
+   *        por Fechamento acontece em `normalize`, de qualquer forma.
+   */
+  function buildUrl(currency, from, to, serverFilter) {
+    var url = CFG.PTAX_BASE +
       '?@moeda=' + encodeURIComponent("'" + currency + "'") +
       '&@dataInicial=' + encodeURIComponent("'" + Dates.toBcb(from) + "'") +
-      '&@dataFinalCotacao=' + encodeURIComponent("'" + Dates.toBcb(to) + "'") +
-      '&$filter=' + encodeURIComponent("tipoBoletim eq '" + CFG.BULLETIN + "'") +
-      '&$select=' + encodeURIComponent(CFG.SELL_FIELD + ',dataHoraCotacao') +
-      '&$format=json';
+      '&@dataFinalCotacao=' + encodeURIComponent("'" + Dates.toBcb(to) + "'");
+    if (serverFilter !== false) {
+      url += '&$filter=' + encodeURIComponent("tipoBoletim eq '" + CFG.BULLETIN + "'");
+    }
+    return url + '&$format=json';
   }
 
   /**
@@ -53,25 +78,52 @@
     var meta = CFG.CURRENCIES[currency];
     var byDate = Object.create(null);
     (raw || []).forEach(function (r) {
+      // Só o boletim de fechamento. Vale tanto para a resposta já filtrada
+      // pelo servidor quanto para a resposta crua do caminho de contingência.
+      if (r.tipoBoletim !== undefined && r.tipoBoletim !== CFG.BULLETIN) return;
+
+      // VENDA, e nada além disso. `cotacaoCompra` e as paridades podem vir na
+      // resposta, mas não são lidas em nenhum ponto desta função.
       var v = r[CFG.SELL_FIELD];
       if (typeof v !== 'number' || !isFinite(v) || v <= 0) return;
       if (!r.dataHoraCotacao) return;
       var date = String(r.dataHoraCotacao).slice(0, 10); // "YYYY-MM-DD"
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-      // Se houver mais de um registro para a mesma data, mantém o último
-      // boletim retornado (a ordem da API é cronológica).
       byDate[date] = { date: date, currency: currency, currencyName: meta.name, sellRate: v };
     });
     return Object.keys(byDate).sort().map(function (d) { return byDate[d]; });
   }
 
-  function fetchWindow(currency, from, to) {
-    return fetch(buildUrl(currency, from, to), { cache: 'no-store' })
+  function request(url) {
+    return fetch(url, { cache: 'no-store' })
       .then(function (res) {
-        if (!res.ok) throw new Error('BCB respondeu ' + res.status);
+        if (!res.ok) {
+          var e = new Error('O Banco Central recusou a consulta (HTTP ' + res.status + ')');
+          e.status = res.status;
+          throw e;
+        }
         return res.json();
       })
       .then(function (json) { return json.value || []; });
+  }
+
+  /**
+   * Busca uma janela com degradação em camadas: se a consulta enxuta for
+   * recusada (403/400 por causa de um parâmetro opcional), repete sem o
+   * $filter. Um erro de rede não aciona o fallback — nesse caso a segunda
+   * tentativa falharia igual e só atrasaria a resposta.
+   */
+  function fetchWindow(currency, from, to) {
+    return request(buildUrl(currency, from, to, true))
+      .catch(function (err) {
+        if (!err.status) throw err;            // falha de rede/CORS
+        if (err.status < 400 || err.status >= 500) throw err;
+        if (global.console && console.warn) {
+          console.warn('[BCB] $filter recusado (HTTP ' + err.status +
+                       '). Repetindo sem o parâmetro e filtrando localmente.');
+        }
+        return request(buildUrl(currency, from, to, false));
+      });
   }
 
   /**
