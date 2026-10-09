@@ -79,10 +79,12 @@
       state.stale = false;
       state.truncated = null;
       state.error = null;
+      state.errorStatus = null;
 
       results.forEach(function (r) {
         if (r.err) {
           state.error = r.err.message || 'Falha na consulta';
+          state.errorStatus = r.err.status || null;
           return;
         }
         if (!r.res) return;
@@ -119,9 +121,15 @@
              '<span>Atualizando cotações do Banco Central&hellip;</span>';
     } else if (state.error && !hasAnyData()) {
       cls += ' is-error';
+      // Um 4xx é uma recusa do serviço, não uma oscilação: insistir não resolve
+      // e o aviso precisa dizer isso, ou o problema passa por instabilidade.
+      var recusa = state.errorStatus >= 400 && state.errorStatus < 500;
       html = '<span><strong>Não foi possível atualizar as cotações.</strong> ' +
-             'Tente novamente em alguns instantes. ' +
-             '<span style="color:var(--gray)">(' + escapeHtml(state.error) + ')</span></span>';
+             (recusa
+               ? 'O serviço do Banco Central recusou a consulta (HTTP ' + state.errorStatus +
+                 '). Isso costuma indicar mudança no serviço, não uma falha passageira.'
+               : 'Tente novamente em alguns instantes.') +
+             ' <span style="color:var(--gray)">(' + escapeHtml(state.error) + ')</span></span>';
     } else if (state.error && hasAnyData()) {
       // Uma moeda respondeu e a outra não.
       cls += ' is-error';

@@ -30,7 +30,6 @@ CotacaoMoedaPeriodo(moeda=@moeda,dataInicial=@dataInicial,dataFinalCotacao=@data
 | `@moeda` | `'USD'` ou `'EUR'` |
 | `@dataInicial` / `@dataFinalCotacao` | `'MM-DD-YYYY'` |
 | `$filter` | `tipoBoletim eq 'Fechamento'` |
-| `$select` | `cotacaoVenda,dataHoraCotacao` |
 | `$format` | `json` |
 
 O mesmo recurso atende as duas moedas. Ele foi escolhido em vez de
@@ -43,12 +42,48 @@ Verificou-se que os valores retornados são idênticos aos de
 
 O painel usa **exclusivamente** o campo `cotacaoVenda`.
 
-`cotacaoCompra` não é sequer solicitado ao servidor (graças ao `$select`),
-portanto não existe caminho no código por onde um valor de compra possa
-entrar. A palavra "compra" aparece no código-fonte apenas em comentários.
+A resposta do BCB traz também `cotacaoCompra` e as paridades, mas a função
+`normalize` em `src/bcb-service.js` lê apenas `cotacaoVenda` e monta o modelo
+com esse único valor numérico. Nenhum outro campo atravessa a camada de dados.
+A palavra "compra" aparece no código-fonte apenas em comentários.
 
-Exemplo de 28/08/2026: a API retorna `cotacaoCompra = 5,19990` e
-`cotacaoVenda = 5,20050`. O painel exibe **R$ 5,2005**.
+Exemplo de 09/10/2026: a API retorna `cotacaoCompra = 4,98860` e
+`cotacaoVenda = 4,98920`. O painel exibe **R$ 4,9892**.
+
+### Resiliência da consulta
+
+A consulta é montada em camadas, da mais enxuta para a mais crua:
+
+| | Parâmetros | Observação |
+|---|---|---|
+| Tentativa 1 | rota + `$filter` + `$format` | payload menor, filtro no servidor |
+| Tentativa 2 | rota + `$format` | todos os boletins, filtrados localmente |
+
+Se o BCB recusar um parâmetro opcional (HTTP 4xx), o painel repete a consulta
+sem ele em vez de ficar sem dados. Apenas o caminho mínimo — parâmetros de
+rota mais `$format` — é tratado como obrigatório.
+
+O filtro por boletim de **Fechamento** é aplicado também no cliente, sempre
+que o campo `tipoBoletim` estiver presente. A regra vale mesmo que o `$filter`
+tenha sido recusado pelo servidor — os dois caminhos produzem séries
+idênticas, o que está verificado nos testes.
+
+#### Incidente de 09/10/2026
+
+O painel parou de exibir valores porque o serviço do BCB passou a responder
+**403 a qualquer consulta que usasse `$select`** — parâmetro que o painel
+usava para trazer só dois campos. O recurso em si continuava íntegro: apenas
+aquele parâmetro passou a ser recusado.
+
+Correções aplicadas:
+
+- `$select` removido; os campos são selecionados na normalização.
+- Consulta em camadas, para que a recusa de um parâmetro opcional não derrube
+  o painel de novo.
+- Filtro de boletim de fechamento garantido no cliente.
+- O aviso de erro passou a distinguir recusa do serviço (4xx) de oscilação de
+  rede, e informa o código HTTP. Antes, um 403 era apresentado como falha
+  passageira com a orientação de "tentar novamente em alguns instantes".
 
 ### Dias sem cotação
 
@@ -128,7 +163,23 @@ aviso "Exibindo dados armazenados anteriormente".
 
 Validação cruzada contra o **SGS**, sistema de séries temporais do Banco
 Central independente do PTAX/Olinda (série 1 = dólar venda, 21619 = euro venda).
-Período 01/08/2026 a 31/08/2026:
+
+Reexecutada em 09/10/2026 após a correção, período 09/09 a 09/10/2026 — todos
+os valores idênticos ao SGS:
+
+| | Painel | SGS |
+|---|---|---|
+| Boletins (USD / EUR) | 23 / 23 | 23 / 23 |
+| USD primeira | 09/09 — 5,0979 | 09/09 — 5,0979 |
+| USD última | 09/10 — 4,9892 | 09/10 — 4,9892 |
+| USD máxima | 02/10 — 5,2238 | 02/10 — 5,2238 |
+| USD mínima | 06/10 — 4,9698 | 06/10 — 4,9698 |
+| USD variação | −2,132251% | −2,132251% |
+| EUR primeira | 09/09 — 5,9278 | 09/09 — 5,9278 |
+| EUR última | 09/10 — 5,5844 | 09/10 — 5,5844 |
+| EUR variação | −5,793043% | −5,793043% |
+
+Validação original, período 01/08/2026 a 31/08/2026:
 
 | | Painel | SGS |
 |---|---|---|
